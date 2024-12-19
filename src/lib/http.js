@@ -21,10 +21,12 @@ export class WeaviateClient {
     }
 
     makeRequest(method, path, body = null, params = {}) {
-        const url = `${this.baseUrl}/v1${path}`;
+        const cleanPath = path.startsWith('/v1/') ? path.substring(3) : path;
+        const url = `${this.baseUrl}/v1${cleanPath}`;
         const requestParams = {
             headers: this.getHeaders(),
             tags: { name: path },
+            responseType: 'text',
             ...params
         };
 
@@ -48,7 +50,10 @@ export class WeaviateClient {
                 throw new Error(`Unsupported HTTP method: ${method}`);
         }
 
-        this.logIfError(response, method, path, body);
+        if (response.status !== 200) {
+            console.log(`${method} ${url} failed: ${response.status} - ${response.body}`);
+        }
+
         return response;
     }
 

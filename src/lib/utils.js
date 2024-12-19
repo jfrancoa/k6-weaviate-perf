@@ -17,24 +17,19 @@ export function randomSleep(config = defaultConfig.timing) {
 }
 
 export function createCollectionConfig({
-    name,
-    description = "A collection with multi-tenancy enabled",
+    class: className,
+    description = "A collection",
     vectorizer = "none",
     replicationConfig = null,
-    multiTenancyConfig = { enabled: true, autoTenantCreation: false }
-}) {
-    const config = {
-        class: name,
+    multiTenancyConfig = { enabled: false, autoTenantCreation: false }
+} = {}) {
+    return {
+        class: className,
         description,
         vectorizer,
+        ...(replicationConfig && { replicationConfig }),
         multiTenancyConfig
     };
-
-    if (replicationConfig) {
-        config.replicationConfig = replicationConfig;
-    }
-
-    return config;
 }
 
 export function createTenantConfig(name, status = "ACTIVE") {

@@ -3,7 +3,7 @@
 # Default values
 WEAVIATE_HOST=${WEAVIATE_HOST:-"http://localhost:8080"}
 WEAVIATE_API_KEY=${WEAVIATE_API_KEY:-""}
-MULTI_TENANCY=${MULTI_TENANCY:-"true"}
+MULTI_TENANCY=${MULTI_TENANCY:-"false"}
 AUTO_TENANT_CREATION=${AUTO_TENANT_CREATION:-"false"}
 NUMBER_TENANTS=${NUMBER_TENANTS:-"2"}
 NUMBER_OBJECTS=${NUMBER_OBJECTS:-"10"}
@@ -48,6 +48,7 @@ usage() {
     echo "Available tests:"
     echo "  multi-tenancy    - Run the multi-tenancy test"
     echo "  object-insertion - Run the object insertion test"
+    echo "  object-simulation - Run the object simulation test"
     echo
     echo "Available cloud zones for GCP us-east1:"
     echo "  amazon:us:ashburn     Ashburn, US (closest to GCP us-east1)"

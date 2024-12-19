@@ -6,6 +6,10 @@ import { getUniqueCollectionName, generateTenantNames, randomSleep } from '../li
 import { Collection } from '../lib/models/Collection.js';
 import { Tenant } from '../lib/models/Tenant.js';
 import { WeaviateObject } from '../lib/models/WeaviateObject.js';
+import { Counter } from 'k6/metrics';
+
+// Create a counter to track collections
+const collectionsCounter = new Counter('collections_created');
 
 export let options = {
     vus: defaultConfig.test.vus,
@@ -22,6 +26,9 @@ export let options = {
     }
 };
 
+// Initialize the client
+const client = new WeaviateClient();
+
 export function setup() {
     console.log('\nTest configuration:');
     console.log(`- Virtual Users: ${defaultConfig.test.vus}`);
@@ -37,73 +44,112 @@ export default async function () {
     let startTime = new Date();
     let success = true;
 
-    // Initialize client
-    const client = new WeaviateClient();
-
-    // Generate unique collection name and tenant names for this iteration
-    const collectionName = getUniqueCollectionName();
-    const tenantNames = generateTenantNames(defaultConfig.tenant.count, collectionName);
-
-    // Create collection instance
-    const collection = new Collection(client, collectionName, true, defaultConfig.tenant.autoCreation);
-
-    // Create collection with multi-tenancy enabled
-    success = await collection.create({
-        replicationConfig: defaultConfig.collection.replicationFactor > 1 ? {
-            factor: defaultConfig.collection.replicationFactor,
-            asyncEnabled: defaultConfig.collection.asyncReplication,
-            deletionStrategy: "NoAutomatedResolution"
-        } : null
-    }) && success;
-
-    // Create tenant instances
-    const tenants = tenantNames.map(name => collection.tenant(name));
-
-    // Create tenants explicitly if autoTenantCreation is false
-    if (!defaultConfig.tenant.autoCreation) {
-        success = await Tenant.createMany(client, collection, tenantNames) && success;
-    }
-
-    // Create objects for each tenant
-    success = await WeaviateObject.createMany(
-        client,
-        collection,
-        tenants,
-        defaultConfig.objects.count,
-        defaultConfig.objects.useBatch,
-        defaultConfig.objects.batchSize
-    ) && success;
-
-    // Deactivate tenants (HOT to COLD)
-    success = await Promise.all(tenants.map(tenant => tenant.deactivate()))
-        .then(results => results.every(result => result)) && success;
-
-    // Random sleep between state changes
-    randomSleep();
-
-    // Reactivate tenants (COLD to HOT)
-    success = await Promise.all(tenants.map(tenant => tenant.activate()))
-        .then(results => results.every(result => result)) && success;
-
-    // Optional: Test offloading if configured
-    if (defaultConfig.collection.s3OffloadEnabled) {
-        // Offload tenants
-        success = await Promise.all(tenants.map(tenant => tenant.offload()))
-            .then(results => results.every(result => result)) && success;
+    try {
+        // Generate unique collection name for this VU
+        const collectionName = getUniqueCollectionName();
+        collectionsCounter.add(1);
         
-        randomSleep();
+        console.log(`\nVU ${__VU}: Creating collection ${collectionName}`);
+
+        // Create collection instance
+        const collection = new Collection(
+            collectionName,
+            true,  // Multi-tenancy enabled
+            defaultConfig.tenant.autoCreation
+        );
+
+        // Create collection
+        success = await Collection.create(client, collection, {
+            replicationConfig: defaultConfig.collection.replicationFactor > 1 ? {
+                factor: defaultConfig.collection.replicationFactor,
+                asyncEnabled: defaultConfig.collection.asyncReplication,
+                deletionStrategy: "NoAutomatedResolution"
+            } : null
+        }) && success;
+
+        // Wait for collection to be ready before proceeding
+        sleep(2);
+
+        // Verify collection exists before creating tenants
+        const schemaResponse = await client.makeRequest('GET', `/schema/${collectionName}`);
+        if (schemaResponse.status !== 200) {
+            console.log(`Waiting for collection ${collectionName} to be ready...`);
+            sleep(3); // Wait a bit longer if collection is not ready
+        }
+
+        // Generate tenant names
+        const tenantNames = generateTenantNames(defaultConfig.tenant.count, collectionName);
         
-        // Reactivate from offloaded state
-        success = await Promise.all(tenants.map(tenant => tenant.activate()))
-            .then(results => results.every(result => result)) && success;
+        if (!defaultConfig.tenant.autoCreation) {
+            success = await Tenant.createMany(client, collection, tenantNames) && success;
+            if (!success) {
+                console.error('Failed to create tenants');
+                return;
+            }
+            // Add a small delay to ensure tenants are fully created
+            sleep(2);
+        }
+
+        // Create objects only if previous steps were successful
+        if (success) {
+            success = await WeaviateObject.createMany(
+                client,
+                collection,
+                tenantNames,
+                defaultConfig.objects.count,
+                defaultConfig.objects.useBatch,
+                defaultConfig.objects.batchSize
+            ) && success;
+
+            if (!success) {
+                console.error('Failed to create objects');
+                return;
+            }
+        }
+
+        // Only proceed with tenant operations if objects were created successfully
+        if (success) {
+            // Deactivate tenants (HOT to COLD)
+            for (const tenantName of tenantNames) {
+                success = await Tenant.deactivate(client, collectionName, tenantName) && success;
+            }
+
+            // Random sleep between state changes
+            randomSleep();
+
+            // Reactivate tenants (COLD to HOT)
+            for (const tenantName of tenantNames) {
+                success = await Tenant.activate(client, collectionName, tenantName) && success;
+            }
+
+            // Optional: Test offloading if configured
+            if (defaultConfig.collection.s3OffloadEnabled) {
+                // Offload tenants
+                for (const tenantName of tenantNames) {
+                    success = await Tenant.offload(client, collectionName, tenantName) && success;
+                }
+                
+                randomSleep();
+                
+                // Reactivate from offloaded state
+                for (const tenantName of tenantNames) {
+                    success = await Tenant.activate(client, collectionName, tenantName) && success;
+                }
+            }
+
+            // Delete tenants
+            for (const tenantName of tenantNames) {
+                success = await Tenant.delete(client, collectionName, tenantName) && success;
+            }
+
+            // Clean up - delete the collection
+            success = await Collection.delete(client, collection) && success;
+        }
+
+    } catch (error) {
+        console.error('Test failed:', error);
+        success = false;
     }
-
-    // Delete tenants
-    success = await Promise.all(tenants.map(tenant => tenant.delete()))
-        .then(results => results.every(result => result)) && success;
-
-    // Clean up - delete the collection
-    success = await collection.delete() && success;
 
     // Calculate total duration
     durationMetrics.total.add(new Date() - startTime);

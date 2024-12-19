@@ -3,18 +3,16 @@ import { createTenantConfig } from '../utils.js';
 import { WeaviateObject } from './WeaviateObject.js';
 
 export class Tenant {
-    constructor(client, collection, name) {
-        this.client = client;
-        this.collection = collection;
+    constructor(name) {
         this.name = name;
     }
 
-    async create() {
+    static async create(client, collectionName, tenantName) {
         const startTime = new Date();
         
-        const config = [createTenantConfig(this.name)];
-        const response = await this.client.makeRequest('POST', `/schema/${this.collection.name}/tenants`, config);
-        const success = this.client.detailedCheck(response, 
+        const config = [createTenantConfig(tenantName)];
+        const response = await client.makeRequest('POST', `/schema/${collectionName}/tenants`, config);
+        const success = client.detailedCheck(response, 
             'tenant created successfully', 
             'Create Tenant'
         );
@@ -27,11 +25,11 @@ export class Tenant {
         return success;
     }
 
-    async delete() {
+    static async delete(client, collectionName, tenantName) {
         const startTime = new Date();
         
-        const response = await this.client.makeRequest('DELETE', `/schema/${this.collection.name}/tenants`, [this.name]);
-        const success = this.client.detailedCheck(response,
+        const response = await client.makeRequest('DELETE', `/schema/${collectionName}/tenants`, [tenantName]);
+        const success = client.detailedCheck(response,
             'tenant deleted successfully',
             'Delete Tenant'
         );
@@ -44,13 +42,13 @@ export class Tenant {
         return success;
     }
 
-    async updateStatus(status) {
+    static async updateStatus(client, collectionName, tenantName, status) {
         const startTime = new Date();
         const operation = `tenant ${status.toLowerCase()}`;
         
-        const config = [createTenantConfig(this.name, status)];
-        const response = await this.client.makeRequest('PUT', `/schema/${this.collection.name}/tenants`, config);
-        const success = this.client.detailedCheck(response,
+        const config = [createTenantConfig(tenantName, status)];
+        const response = await client.makeRequest('PUT', `/schema/${collectionName}/tenants`, config);
+        const success = client.detailedCheck(response,
             `tenant ${status.toLowerCase()}d successfully`,
             `${status} Tenant`
         );
@@ -74,39 +72,41 @@ export class Tenant {
         return success;
     }
 
-    async activate() {
-        return this.updateStatus('ACTIVE');
+    static async activate(client, collectionName, tenantName) {
+        return this.updateStatus(client, collectionName, tenantName, 'ACTIVE');
     }
 
-    async deactivate() {
-        return this.updateStatus('INACTIVE');
+    static async deactivate(client, collectionName, tenantName) {
+        return this.updateStatus(client, collectionName, tenantName, 'INACTIVE');
     }
 
-    async offload() {
-        return this.updateStatus('OFFLOADED');
+    static async offload(client, collectionName, tenantName) {
+        return this.updateStatus(client, collectionName, tenantName, 'OFFLOADED');
     }
 
-    // Factory method to create an Object instance for this tenant
-    object(properties = {}) {
-        return new WeaviateObject(this.client, this.collection, this, properties);
-    }
-
-    // Static method to handle multiple tenants
     static async createMany(client, collection, tenantNames) {
         const startTime = new Date();
-        
-        const tenantConfigs = tenantNames.map(name => createTenantConfig(name));
-        const response = await client.makeRequest('POST', `/schema/${collection.name}/tenants`, tenantConfigs);
-        const success = client.detailedCheck(response, 
-            'tenants created successfully', 
-            'Create Tenants'
-        );
-        
-        durationMetrics.createTenants.add(new Date() - startTime);
-        if (success) {
-            operationCounters.tenantsCreated.add(tenantNames.length);
+        let success = true;
+
+        try {
+            const tenants = tenantNames.map(name => ({
+                name: name,
+                activityStatus: "ACTIVE"
+            }));
+
+            const response = await client.makeRequest(
+                'POST',
+                `/schema/${collection.name}/tenants`,
+                tenants
+            );
+
+            success = client.detailedCheck(response, 'tenants created successfully', 'Create Tenants');
+        } catch (error) {
+            console.error('Error creating tenants:', error);
+            success = false;
         }
-        
+
+        durationMetrics.createTenants.add(new Date() - startTime);
         return success;
     }
 } 

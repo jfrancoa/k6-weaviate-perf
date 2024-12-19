@@ -4,6 +4,7 @@ import { defaultConfig } from '../config/default.js';
 import { WeaviateClient } from '../lib/http.js';
 import { getUniqueCollectionName, generateTenantNames } from '../lib/utils.js';
 import { Collection } from '../lib/models/Collection.js';
+import { Tenant } from '../lib/models/Tenant.js';
 import { WeaviateObject } from '../lib/models/WeaviateObject.js';
 import { Counter } from 'k6/metrics';
 
@@ -44,6 +45,9 @@ export let options = {
     }
 };
 
+// Shared state between iterations
+const client = new WeaviateClient();
+
 export function setup() {
     console.log('\nTest configuration:');
     console.log(`- Virtual Users: ${defaultConfig.test.vus}`);
@@ -53,34 +57,28 @@ export function setup() {
     console.log(`- Batch mode: ${defaultConfig.objects.useBatch}`);
     console.log(`- Replication factor: ${defaultConfig.collection.replicationFactor}`);
     console.log(`- Async replication: ${defaultConfig.collection.asyncReplication}`);
-
 }
 
 export default async function () {
     let startTime = new Date();
     let success = true;
-    let collection = null;
 
     try {
-        // Initialize client
-        const client = new WeaviateClient();
-
         // Generate unique collection name for this VU
         const collectionName = getUniqueCollectionName();
         collectionsCounter.add(1);
         
         console.log(`\nVU ${__VU}: Creating collection ${collectionName}`);
 
-        // Create collection instance with multi-tenancy configuration
-        collection = new Collection(
-            client, 
-            collectionName, 
+        // Create collection instance
+        const collection = new Collection(
+            collectionName,
             defaultConfig.tenant.enabled,
             defaultConfig.tenant.autoCreation
         );
 
         // Create collection
-        success = await collection.create({
+        success = await Collection.create(client, collection, {
             replicationConfig: defaultConfig.collection.replicationFactor > 1 ? {
                 factor: defaultConfig.collection.replicationFactor,
                 asyncEnabled: defaultConfig.collection.asyncReplication,
@@ -88,45 +86,54 @@ export default async function () {
             } : null
         }) && success;
 
-        let tenants = null;
+        // Wait for collection to be ready before proceeding
+        sleep(2);
+
+        let tenantNames = null;
         if (defaultConfig.tenant.enabled) {
             // Generate tenant names and create tenants if multi-tenancy is enabled
-            const tenantNames = generateTenantNames(defaultConfig.tenant.count, collectionName);
-            tenants = tenantNames.map(name => collection.tenant(name));
+            tenantNames = generateTenantNames(defaultConfig.tenant.count, collectionName);
             
             if (!defaultConfig.tenant.autoCreation) {
-                for (const tenant of tenants) {
-                    success = await tenant.create() && success;
+                // Verify collection exists before creating tenants
+                const schemaResponse = await client.makeRequest('GET', `/schema/${collectionName}`);
+                if (schemaResponse.status !== 200) {
+                    console.log(`Waiting for collection ${collectionName} to be ready...`);
+                    sleep(3); // Wait a bit longer if collection is not ready
                 }
+
+                success = await Tenant.createMany(client, collection, tenantNames) && success;
+                // Add a small delay to ensure tenants are fully created
+                sleep(2);
             }
         }
 
         // Create objects
-        success = await WeaviateObject.createMany(
-            client,
-            collection,
-            tenants,
-            defaultConfig.objects.count,
-            defaultConfig.objects.useBatch,
-            defaultConfig.objects.batchSize
-        ) && success;
-
-        // Calculate total duration for this iteration
-        durationMetrics.total.add(new Date() - startTime);
-
-        // Record error rate
-        errorRate.add(!success);
+        if (success) {  // Only create objects if collection and tenants were created successfully
+            success = await WeaviateObject.createMany(
+                client,
+                collection,
+                defaultConfig.tenant.enabled ? tenantNames : null,
+                defaultConfig.objects.count,
+                defaultConfig.objects.useBatch,
+                defaultConfig.objects.batchSize
+            ) && success;
+        }
 
     } catch (error) {
         console.error(`VU ${__VU}: Test failed:`, error);
         success = false;
-        errorRate.add(true);
     }
+
+    // Record error rate
+    errorRate.add(!success);
+    
+    // Add duration metric
+    durationMetrics.total.add(new Date() - startTime);
 }
 
 export async function teardown() {
     // Clean up all collections created during the test
-    const client = new WeaviateClient();
     console.log('\nCleaning up collections...');
     
     try {
@@ -163,13 +170,9 @@ export async function teardown() {
 
         // Delete each collection
         for (const collectionName of testCollections) {
-            try {
-                const collection = new Collection(client, collectionName);
-                await collection.delete();
-                console.log(`Deleted collection: ${collectionName}`);
-            } catch (error) {
-                console.error(`Failed to delete collection ${collectionName}:`, error);
-            }
+            const collection = new Collection(collectionName, false, false);
+            await Collection.delete(client, collection);
+            console.log(`Deleted collection: ${collectionName}`);
         }
     } catch (error) {
         console.error('Cleanup failed:', error);

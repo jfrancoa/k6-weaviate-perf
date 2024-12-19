@@ -4,14 +4,13 @@ import { Tenant } from './Tenant.js';
 import { WeaviateObject } from './WeaviateObject.js';
 
 export class Collection {
-    constructor(client, name, isMultiTenant = true, autoTenantCreation = false) {
-        this.client = client;
+    constructor(name, isMultiTenant = true, autoTenantCreation = false) {
         this.name = name;
         this.isMultiTenant = isMultiTenant;
         this.autoTenantCreation = autoTenantCreation;
     }
 
-    async create({
+    static async create(client, collection, {
         description = "A collection",
         vectorizer = "none",
         replicationConfig = null
@@ -26,33 +25,33 @@ export class Collection {
 
         // Only include multiTenancyConfig if this is a multi-tenant collection
         const config = createCollectionConfig({
-            name: this.name,
+            class: collection.name,
             description,
             vectorizer,
             replicationConfig: formattedReplicationConfig,
-            multiTenancyConfig: this.isMultiTenant
-                ? { enabled: true, autoTenantCreation: this.autoTenantCreation }
+            multiTenancyConfig: collection.isMultiTenant
+                ? { enabled: true, autoTenantCreation: collection.autoTenantCreation }
                 : { enabled: false, autoTenantCreation: false }
         });
 
-        const response = await this.client.makeRequest('POST', '/schema', config);
-        const success = this.client.detailedCheck(response, 'collection created successfully', 'Create Collection');
+        const response = await client.makeRequest('POST', '/schema', config);
+        const success = client.detailedCheck(response, 'collection created successfully', 'Create Collection');
         
         durationMetrics.createCollection.add(new Date() - startTime);
         return success;
     }
 
-    async delete() {
+    static async delete(client, collection) {
         const startTime = new Date();
         
-        const response = await this.client.makeRequest('DELETE', `/schema/${this.name}`);
-        const success = this.client.detailedCheck(response, 'collection deleted successfully', 'Delete Collection');
+        const response = await client.makeRequest('DELETE', `/schema/${collection.name}`);
+        const success = client.detailedCheck(response, 'collection deleted successfully', 'Delete Collection');
         
         durationMetrics.deleteCollection.add(new Date() - startTime);
         return success;
     }
 
-    async backup(backupId, include = ["*"]) {
+    static async backup(client, collection, backupId, include = ["*"]) {
         const startTime = new Date();
         
         const config = {
@@ -60,57 +59,21 @@ export class Collection {
             include
         };
         
-        const response = await this.client.makeRequest('POST', `/backups/${this.name}`, config);
-        const success = this.client.detailedCheck(response, 'backup created successfully', 'Create Backup');
+        const response = await client.makeRequest('POST', `/backups/${collection.name}`, config);
+        const success = client.detailedCheck(response, 'backup created successfully', 'Create Backup');
         
         durationMetrics.backup.add(new Date() - startTime);
         return success;
     }
 
-    async restore(backupId) {
+    static async restore(client, collection, backupId) {
         const startTime = new Date();
         
-        const response = await this.client.makeRequest('POST', `/backups/${this.name}/${backupId}/restore`);
-        const success = this.client.detailedCheck(response, 'restore completed successfully', 'Restore Backup');
+        const response = await client.makeRequest('POST', `/backups/${collection.name}/${backupId}/restore`);
+        const success = client.detailedCheck(response, 'restore completed successfully', 'Restore Backup');
         
         durationMetrics.restore.add(new Date() - startTime);
         return success;
     }
 
-    // Factory method to create a Tenant instance for this collection
-    tenant(name) {
-        if (!this.isMultiTenant) {
-            throw new Error('Cannot create tenant for non-multi-tenant collection');
-        }
-        return new Tenant(this.client, this, name);
-    }
-
-    // Factory method to create an Object instance for this collection
-    object(tenant = null) {
-        if (this.isMultiTenant && !tenant) {
-            throw new Error('Tenant is required for multi-tenant collections');
-        }
-        return new WeaviateObject(this.client, this, tenant);
-    }
-
-    // Batch object creation
-    async batchObjects(objects) {
-        const startTime = new Date();
-        
-        const response = await this.client.makeRequest('POST', '/batch/objects', {
-            objects: objects.map(obj => ({
-                class: this.name,
-                properties: obj.properties,
-                ...(obj.tenant && { tenant: obj.tenant })
-            }))
-        });
-        
-        const success = this.client.detailedCheck(response, 
-            'batch objects created successfully', 
-            'Create Objects Batch'
-        );
-
-        durationMetrics.createBatchObjects.add(new Date() - startTime);
-        return success;
-    }
 } 

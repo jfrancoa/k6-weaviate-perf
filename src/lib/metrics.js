@@ -10,6 +10,8 @@ export const durationMetrics = {
     createTenants: new Trend('create_tenants_duration', true),
     createObject: new Trend('create_object_duration', true),
     createBatchObjects: new Trend('create_batch_objects_duration', true),
+    deleteBatchObjects: new Trend('delete_batch_objects_duration', true),
+    fetchObjects: new Trend('fetch_objects_duration', true),
     tenantDeactivation: new Trend('tenant_deactivation_duration', true),
     tenantActivation: new Trend('tenant_activation_duration', true),
     tenantDeletion: new Trend('tenant_deletion_duration', true),
