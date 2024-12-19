@@ -8,9 +8,10 @@ WORKERS=${WORKERS:-1}
 RESULTS_DIR="k6_results"
 WEAVIATE_PORT=${WEAVIATE_PORT:-8080}
 LOCAL_K8S_DIR=${LOCAL_K8S_DIR:-~/repos/weaviate-local-k8s}
-K6_ARGS=${K6_ARGS:-"-u 10 -e NUMBER_TENANTS=100 -e AUTO_TENANT_CREATION=true"}
+K6_ARGS=${K6_ARGS:-"--vus 10 --multi-tenant true --tenants 100 --auto-tenant true"}
 K6_QUIET=${K6_QUIET:-true}
 PROFILING=${PROFILING:-false}
+TEST_NAME=${TEST_NAME:-"multi-tenancy"}
 
 # Default RBAC and AUTH_CONFIG values for each version
 RBAC_V1=${RBAC_V1:-false}
@@ -59,6 +60,7 @@ function run_test() {
     local auth_config=$4
     local api_key=$5
     local pre_test_scripts=$6
+    local test_name=$7
     
     echo "Starting Weaviate cluster with version $version (RBAC=$rbac, AUTH_CONFIG=$auth_config API_KEY=${api_key:+enabled (key: $api_key)})..."
     pushd "$LOCAL_K8S_DIR"
@@ -86,7 +88,7 @@ function run_test() {
         
         # Calculate test duration from K6_ARGS
         local duration=30  # default duration in seconds
-        if [[ "$K6_ARGS" =~ -d[[:space:]]*([0-9]+[smh]) ]]; then
+        if [[ "$K6_ARGS" =~ --duration[[:space:]]*([0-9]+[smh]) ]]; then
             local duration_str="${BASH_REMATCH[1]}"
             case ${duration_str: -1} in
                 s) duration="${duration_str%s}";;
@@ -103,21 +105,22 @@ function run_test() {
         done
     fi
 
-    echo "Running k6 tests..."
+    echo "Running k6 tests ${test_name}..."
     # Add API key to k6 arguments if provided
     local k6_auth_args=""
     if [ -n "$api_key" ]; then
-        k6_auth_args="-e WEAVIATE_API_KEY=$api_key"
+        k6_auth_args="--api-key $api_key"
     fi
 
     # Add quiet flag if enabled
     local k6_quiet_arg=""
     if [ "$K6_QUIET" = "true" ]; then
-        k6_quiet_arg="--quiet"
+        k6_quiet_arg="--quiet=true"
     fi
 
-    k6 run $k6_quiet_arg $K6_ARGS $k6_auth_args --out json=metrics.json weaviate-test.js || true
-    mv metrics.json "$result_file"
+    # Run the test using run-test.sh and store the metrics
+    echo "./run-test.sh ${k6_quiet_arg} ${K6_ARGS} ${k6_auth_args} ${result_file:+--out=json=$result_file} $test_name"
+    ./run-test.sh $k6_quiet_arg $K6_ARGS $k6_auth_args ${result_file:+--out=json=$result_file} $test_name || true
 
     # Wait for profiling to complete if enabled
     if [ "$PROFILING" = "true" ]; then
@@ -136,20 +139,43 @@ function run_test() {
     popd
 }
 
+# Print usage information
+function usage() {
+    echo "Usage: $0 [options]"
+    echo "Required environment variables:"
+    echo "  WEAVIATE_VERSION_1    First Weaviate version to test"
+    echo "  WEAVIATE_VERSION_2    Second Weaviate version to test"
+    echo
+    echo "Optional environment variables:"
+    echo "  REPLICAS              Number of Weaviate replicas (default: 1)"
+    echo "  WORKERS               Number of Weaviate workers (default: 1)"
+    echo "  WEAVIATE_PORT         Weaviate port (default: 8080)"
+    echo "  K6_ARGS               Additional k6 arguments"
+    echo "  K6_QUIET              Enable quiet mode (default: true)"
+    echo "  PROFILING             Enable profiling (default: false)"
+    echo "  TEST_NAME             Test to run (default: multi-tenancy)"
+    echo
+    echo "Available cloud zones for GCP us-east1:"
+    echo "  amazon:us:ashburn     Ashburn, US (closest to GCP us-east1)"
+    echo "  amazon:us:columbus    Columbus, US"
+    echo "  amazon:ca:montreal    Montreal, CA"
+    echo
+    echo "Example:"
+    echo "  WEAVIATE_VERSION_1=1.24.4 WEAVIATE_VERSION_2=1.24.5 CLOUD_ENABLED=true $0"
+    exit 1
+}
 # Check required environment variables
 if [ -z "$WEAVIATE_VERSION_1" ] || [ -z "$WEAVIATE_VERSION_2" ]; then
-    echo "Error: WEAVIATE_VERSION_1 and WEAVIATE_VERSION_2 must be set"
-    echo "Usage: WEAVIATE_VERSION_1=1.24.4 WEAVIATE_VERSION_2=1.24.5 $0"
-    exit 1
+    usage
 fi
 
 # Run tests for first version
 echo "Testing Weaviate version $WEAVIATE_VERSION_1..."
-run_test "$WEAVIATE_VERSION_1" "$RESULTS_DIR/metrics_v1.json" "$RBAC_V1" "$AUTH_CONFIG_V1" "$API_KEY_V1" "$PRE_TEST_SCRIPTS_V1"
+run_test "$WEAVIATE_VERSION_1" "$RESULTS_DIR/metrics_v1.json" "$RBAC_V1" "$AUTH_CONFIG_V1" "$API_KEY_V1" "$PRE_TEST_SCRIPTS_V1" "$TEST_NAME"
 
-# Run tests for second version
+# Run tests for second version  
 echo "Testing Weaviate version $WEAVIATE_VERSION_2..."
-run_test "$WEAVIATE_VERSION_2" "$RESULTS_DIR/metrics_v2.json" "$RBAC_V2" "$AUTH_CONFIG_V2" "$API_KEY_V2" "$PRE_TEST_SCRIPTS_V2"
+run_test "$WEAVIATE_VERSION_2" "$RESULTS_DIR/metrics_v2.json" "$RBAC_V2" "$AUTH_CONFIG_V2" "$API_KEY_V2" "$PRE_TEST_SCRIPTS_V2" "$TEST_NAME"
 
 # Run comparison
 echo "Comparing results..."
