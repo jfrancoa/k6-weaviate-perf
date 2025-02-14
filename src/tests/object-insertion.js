@@ -53,6 +53,7 @@ export function setup() {
     console.log(`- Virtual Users: ${defaultConfig.test.vus}`);
     console.log(`- Duration: ${defaultConfig.timing.duration}`);
     console.log(`- Multi-tenancy: ${defaultConfig.tenant.enabled}`);
+    console.log(`- Tenant count: ${defaultConfig.tenant.count}`);
     console.log(`- Objects per VU: ${defaultConfig.objects.count}`);
     console.log(`- Batch mode: ${defaultConfig.objects.useBatch}`);
     console.log(`- Replication factor: ${defaultConfig.collection.replicationFactor}`);

@@ -32,3 +32,19 @@ export const operationCounters = {
     backupsCreated: new Counter('backups_created'),
     restoresPerformed: new Counter('restores_performed')
 }; 
+
+// Convert duration string (e.g., '1m', '60s') to seconds
+export function durationToSeconds(duration) {
+    const match = duration.match(/^(\d+)([smh])$/);
+    if (!match) return 60; // default to 60 seconds if invalid format
+    
+    const value = parseInt(match[1]);
+    const unit = match[2];
+    
+    switch(unit) {
+        case 'h': return value * 3600;
+        case 'm': return value * 60;
+        case 's': return value;
+        default: return 60;
+    }
+}

@@ -1,5 +1,5 @@
 import { sleep } from 'k6';
-import { errorRate, durationMetrics } from '../lib/metrics.js';
+import { errorRate, durationMetrics, durationToSeconds } from '../lib/metrics.js';
 import { defaultConfig } from '../config/default.js';
 import { WeaviateClient } from '../lib/http.js';
 import { getUniqueCollectionName, generateTenantNames, randomSleep } from '../lib/utils.js';
@@ -23,7 +23,33 @@ const tenantData = new SharedArray('tenants', function() {
     return defaultConfig.tenant.enabled ? generateTenantNames(defaultConfig.tenant.count, collectionData[0]) : [];
 });
 
+
+
+// Add this utility function near the top
+function calculateStartTime() {
+    const buffer = 10; // 10-second buffer
+    
+    // Calculate total number of objects to be created
+    const totalObjects = defaultConfig.tenant.enabled ? 
+        defaultConfig.objects.count * defaultConfig.tenant.count : // multiply by number of tenants
+        defaultConfig.objects.count;
+    
+    // Estimate objects per second based on batch settings and tenant configuration
+    const objectsPerSecond = defaultConfig.objects.useBatch ?
+        (defaultConfig.objects.batchSize * 0.25) : // 4 seconds per batch set, using concurrent workers
+        10; // 10 objects/sec single inserts
+    
+    const estimatedSeconds = Math.ceil(
+        totalObjects / objectsPerSecond
+    ) + buffer;
+    
+    console.log(`Estimated setup time: ${estimatedSeconds}s for ${totalObjects} objects${defaultConfig.tenant.enabled ? ` across ${defaultConfig.tenant.count} tenants` : ''}`);
+    
+    return `${estimatedSeconds}s`;
+}
+
 export let options = {
+    vus: defaultConfig.test.vus,
     thresholds: defaultConfig.thresholds,
     noConnectionReuse: defaultConfig.test.noConnectionReuse,
     discardResponseBodies: defaultConfig.test.discardResponseBodies,
@@ -31,18 +57,19 @@ export let options = {
     teardownTimeout: defaultConfig.test.teardownTimeout,
     scenarios: {
         initial_setup: {
-            executor: 'shared-iterations',
-            vus: defaultConfig.test.vus,
+            executor: 'per-vu-iterations',
+            vus: 1,
             iterations: 1,
-            maxDuration: '5m',
+            maxDuration: calculateStartTime(),
             exec: 'initialSetup'
         },
         object_simulation: {
             executor: 'constant-vus',
             vus: defaultConfig.test.vus,
+            startTime: calculateStartTime(), // Dynamic start
             duration: defaultConfig.timing.duration,
-            startTime: '5s',
-            exec: 'objectSimulation'
+            exec: 'objectSimulation',
+            gracefulStop: '30s'
         }
     }
 };
@@ -53,9 +80,16 @@ const client = new WeaviateClient();
 export async function initialSetup() {
     console.log('\nInitial Setup:');
     console.log(`- Multi-tenancy: ${defaultConfig.tenant.enabled}`);
+    if (defaultConfig.tenant.enabled) {
+        console.log(`- Tenant count: ${defaultConfig.tenant.count}`);
+    }
     console.log(`- Initial objects: ${defaultConfig.objects.count}`);
-    console.log(`- Batch mode: ${defaultConfig.objects.useBatch}`);
-    console.log(`- Batch size: ${defaultConfig.objects.batchSize}`);
+    if (defaultConfig.objects.useBatch) {
+        console.log(`- Batch mode: ${defaultConfig.objects.useBatch}`);
+        console.log(`- Batch size: ${defaultConfig.objects.batchSize}`);
+    }
+    console.log(`- Replication factor: ${defaultConfig.collection.replicationFactor}`);
+    console.log(`- Async replication: ${defaultConfig.collection.asyncReplication}`);
 
     // Create collection instance
     const collection = new Collection(
@@ -66,7 +100,7 @@ export async function initialSetup() {
     
     // Create collection with replication config if needed
     await Collection.create(client, collection, {
-        replicationConfig: defaultConfig.collection.replicationFactor > 1 ? {
+        replicationConfig: (defaultConfig.collection.replicationFactor > 1 || defaultConfig.collection.asyncReplication) ? {
             factor: defaultConfig.collection.replicationFactor,
             asyncEnabled: defaultConfig.collection.asyncReplication,
             deletionStrategy: "NoAutomatedResolution"
@@ -82,7 +116,7 @@ export async function initialSetup() {
     await WeaviateObject.createMany(
         client,
         collection,
-        defaultConfig.tenant.enabled ? tenantData.map(name => ({ name })) : null,
+        defaultConfig.tenant.enabled ? tenantData : null,
         defaultConfig.objects.count,
         defaultConfig.objects.useBatch,
         defaultConfig.objects.batchSize
@@ -90,6 +124,9 @@ export async function initialSetup() {
 
     objectsCreated.add(defaultConfig.objects.count);
     objectCount.add(defaultConfig.objects.count);
+    
+    // After successful object creation
+    console.log('Initial setup completed successfully');
 }
 
 export async function objectSimulation() {
@@ -109,8 +146,8 @@ export async function objectSimulation() {
         const operationCount = Math.floor(Math.random() * 1000) + 1;
 
         // Select a random tenant if multi-tenancy is enabled
-        const tenant = defaultConfig.tenant.enabled ? 
-            { name: tenantData[Math.floor(Math.random() * tenantData.length)] } : 
+        const tenantName = defaultConfig.tenant.enabled ? 
+            tenantData[Math.floor(Math.random() * tenantData.length)] : 
             null;
 
         if (shouldAdd) {
@@ -118,7 +155,7 @@ export async function objectSimulation() {
             success = await WeaviateObject.createMany(
                 client,
                 collection,
-                tenant ? [tenant.name] : null,
+                tenantName ? [tenantName] : null,
                 operationCount,
                 defaultConfig.objects.useBatch,
                 defaultConfig.objects.batchSize
@@ -127,38 +164,38 @@ export async function objectSimulation() {
             if (success) {
                 objectsCreated.add(operationCount);
                 objectCount.add(operationCount);
-                console.log(`Added ${operationCount} objects${tenant ? ` for tenant ${tenant.name}` : ''}`);
+                console.log(`Added ${operationCount} objects${tenantName ? ` for tenant ${tenantName}` : ''}`);
             }
         } else {
-            // Get objects to delete
+            // Delete objects
             const objectsToDelete = await WeaviateObject.getObjects(
                 client,
                 collection,
-                tenant,
+                tenantName,
                 operationCount
             );
 
             if (objectsToDelete.length > 0) {
-                const uuids = objectsToDelete.map(obj => obj.id);
                 const result = await WeaviateObject.deleteMany(
                     client,
                     collection,
-                    tenant,
+                    tenantName,
                     {
                         path: ['id'],
                         operator: 'ContainsAny',
-                        valueTextArray: uuids
+                        valueTextArray: objectsToDelete.map(obj => obj.id)
                     }
                 );
 
                 if (result.success) {
                     objectsDeleted.add(result.totalDeleted);
                     objectCount.add(-result.totalDeleted);
-                    console.log(`Deleted ${result.totalDeleted} objects${tenant ? ` for tenant ${tenant.name}` : ''}`);
+                    console.log(`Deleted ${result.totalDeleted} objects${tenantName ? ` for tenant ${tenantName}` : ''}`);
                 }
             }
         }
 
+        // Add random sleep between operations
         sleep(Math.floor(Math.random() * 5) + 3);
 
     } catch (error) {

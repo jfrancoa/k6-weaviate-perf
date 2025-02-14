@@ -19,7 +19,7 @@ export class Collection {
         
         const formattedReplicationConfig = replicationConfig ? {
             factor: replicationConfig.factor || 1,
-            asyncEnabled: replicationConfig.asyncEnabled || false,
+            asyncEnabled: replicationConfig.asyncEnabled !== undefined ? replicationConfig.asyncEnabled : false,
             deletionStrategy: replicationConfig.deletionStrategy || "NoAutomatedResolution"
         } : null;
 

@@ -27,7 +27,7 @@ export function createCollectionConfig({
         class: className,
         description,
         vectorizer,
-        ...(replicationConfig && { replicationConfig }),
+        replicationConfig,
         multiTenancyConfig
     };
 }

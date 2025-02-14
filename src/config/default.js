@@ -10,8 +10,9 @@ export const defaultConfig = {
     },
     objects: {
         count: parseInt(__ENV.NUMBER_OBJECTS || '10'),
-        batchSize: parseInt(__ENV.BATCH_SIZE || '100'),
+        batchSize: parseInt(__ENV.BATCH_SIZE || '1000'),
         useBatch: __ENV.USE_BATCH === 'true',
+        batchWorkers: parseInt(__ENV.BATCH_WORKERS || '8'),
     },
     timing: {
         minThinkTime: parseInt(__ENV.MIN_THINK_TIME || '3'),
@@ -19,7 +20,7 @@ export const defaultConfig = {
         duration: __ENV.DURATION || '30s',
     },
     collection: {
-        replicationFactor: parseInt(__ENV.REPLICATION_FACTOR || '1'),
+        replicationFactor: parseInt(__ENV.REPLICATION_FACTOR || '3'),
         asyncReplication: __ENV.ASYNC_REPLICATION === 'true',
         s3OffloadEnabled: __ENV.S3_OFFLOAD === 'true',
     },
@@ -37,7 +38,7 @@ export const defaultConfig = {
         'delete_collection_duration': ['p(95)<5000'],
         'create_tenants_duration': ['p(95)<2000'],
         'create_object_duration': ['p(95)<1000'],
-        'create_batch_objects_duration': ['p(95)<1000'],
+        'create_batch_objects_duration': ['p(95)<5000'],
         'tenant_activation_duration': ['p(95)<5000'],
         'tenant_deactivation_duration': ['p(95)<5000'],
         'tenant_deletion_duration': ['p(95)<2000'],

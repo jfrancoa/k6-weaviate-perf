@@ -8,12 +8,13 @@ AUTO_TENANT_CREATION=${AUTO_TENANT_CREATION:-"false"}
 NUMBER_TENANTS=${NUMBER_TENANTS:-"2"}
 NUMBER_OBJECTS=${NUMBER_OBJECTS:-"10"}
 USE_BATCH=${USE_BATCH:-"false"}
-BATCH_SIZE=${BATCH_SIZE:-"100"}
+BATCH_SIZE=${BATCH_SIZE:-"1000"}
+BATCH_WORKERS=${BATCH_WORKERS:-"8"}
 DURATION=${DURATION:-"30s"}
 VUS=${VUS:-"1"}
 MIN_THINK_TIME=${MIN_THINK_TIME:-"3"}
 MAX_THINK_TIME=${MAX_THINK_TIME:-"8"}
-REPLICATION_FACTOR=${REPLICATION_FACTOR:-"1"}
+REPLICATION_FACTOR=${REPLICATION_FACTOR:-"3"}
 ASYNC_REPLICATION=${ASYNC_REPLICATION:-"false"}
 BACKUP_ENABLED=${BACKUP_ENABLED:-"false"}
 CLOUD_ENABLED=${CLOUD_ENABLED:-"false"}
@@ -31,7 +32,8 @@ usage() {
     echo "  --offload <true/false>    Enable offload (default: false)"
     echo "  --objects <number>        Number of objects to create (default: 10)"
     echo "  --use-batch <true/false>  Enable batch object creation (default: false)"
-    echo "  --batch-size <number>     Batch size for object creation (default: 100)"
+    echo "  --batch-size <number>     Batch size for object creation (default: 1000)"
+    echo "  --batch-workers <number>  Number of concurrent batch workers (default: 8)"
     echo "  --duration <duration>      Test duration (default: 30s)"
     echo "  --vus <number>            Number of virtual users (default: 1)"
     echo "  --min-think <seconds>     Minimum think time (default: 3)"
@@ -94,6 +96,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --batch-size)
             BATCH_SIZE="$2"
+            shift 2
+            ;;
+        --batch-workers)
+            BATCH_WORKERS="$2"
             shift 2
             ;;
         --duration)
@@ -182,6 +188,7 @@ $K6_CMD \
     -e NUMBER_OBJECTS="$NUMBER_OBJECTS" \
     -e USE_BATCH="$USE_BATCH" \
     -e BATCH_SIZE="$BATCH_SIZE" \
+    -e BATCH_WORKERS="$BATCH_WORKERS" \
     -e DURATION="$DURATION" \
     -e VUS="$VUS" \
     -e MIN_THINK_TIME="$MIN_THINK_TIME" \
