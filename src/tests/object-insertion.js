@@ -2,7 +2,7 @@ import { sleep } from 'k6';
 import { errorRate, durationMetrics } from '../lib/metrics.js';
 import { defaultConfig } from '../config/default.js';
 import { WeaviateClient } from '../lib/http.js';
-import { getUniqueCollectionName, generateTenantNames } from '../lib/utils.js';
+import { getUniqueCollectionName, generateTenantNames, calculateTimeToIngest } from '../lib/utils.js';
 import { Collection } from '../lib/models/Collection.js';
 import { Tenant } from '../lib/models/Tenant.js';
 import { WeaviateObject } from '../lib/models/WeaviateObject.js';
@@ -27,9 +27,6 @@ function durationToSeconds(duration) {
     }
 }
 
-// Add some buffer time to ensure cleanup completes
-const teardownTime = durationToSeconds(defaultConfig.timing.duration) + 60; // Add 1 minute buffer
-
 export let options = {
     vus: defaultConfig.test.vus,
     duration: defaultConfig.timing.duration,
@@ -37,7 +34,7 @@ export let options = {
     noConnectionReuse: defaultConfig.test.noConnectionReuse,
     discardResponseBodies: false,
     setupTimeout: '1m',
-    teardownTimeout: `${teardownTime}s`,  // Use converted seconds plus buffer
+    teardownTimeout: calculateTimeToIngest(),  // Use converted seconds plus buffer
     cloud: {
         distribution: {
             distributionLabel: { loadZone: defaultConfig.test.cloudZone, percent: 100 }
@@ -80,10 +77,10 @@ export default async function () {
 
         // Create collection
         success = await Collection.create(client, collection, {
-            replicationConfig: defaultConfig.collection.replicationFactor > 1 ? {
+            replicationConfig: (defaultConfig.collection.replicationFactor > 1 || defaultConfig.collection.asyncReplication || defaultConfig.collection.deleteStrategy !== "NoAutomatedResolution") ? {
                 factor: defaultConfig.collection.replicationFactor,
                 asyncEnabled: defaultConfig.collection.asyncReplication,
-                deletionStrategy: "NoAutomatedResolution"
+                deletionStrategy: defaultConfig.collection.deleteStrategy
             } : null
         }) && success;
 

@@ -2,7 +2,7 @@ import { sleep } from 'k6';
 import { errorRate, durationMetrics, durationToSeconds } from '../lib/metrics.js';
 import { defaultConfig } from '../config/default.js';
 import { WeaviateClient } from '../lib/http.js';
-import { getUniqueCollectionName, generateTenantNames, randomSleep } from '../lib/utils.js';
+import { getUniqueCollectionName, generateTenantNames, calculateTimeToIngest } from '../lib/utils.js';
 import { Collection } from '../lib/models/Collection.js';
 import { Tenant } from '../lib/models/Tenant.js';
 import { WeaviateObject } from '../lib/models/WeaviateObject.js';
@@ -25,29 +25,6 @@ const tenantData = new SharedArray('tenants', function() {
 
 
 
-// Add this utility function near the top
-function calculateStartTime() {
-    const buffer = 10; // 10-second buffer
-    
-    // Calculate total number of objects to be created
-    const totalObjects = defaultConfig.tenant.enabled ? 
-        defaultConfig.objects.count * defaultConfig.tenant.count : // multiply by number of tenants
-        defaultConfig.objects.count;
-    
-    // Estimate objects per second based on batch settings and tenant configuration
-    const objectsPerSecond = defaultConfig.objects.useBatch ?
-        (defaultConfig.objects.batchSize * 0.25) : // 4 seconds per batch set, using concurrent workers
-        10; // 10 objects/sec single inserts
-    
-    const estimatedSeconds = Math.ceil(
-        totalObjects / objectsPerSecond
-    ) + buffer;
-    
-    console.log(`Estimated setup time: ${estimatedSeconds}s for ${totalObjects} objects${defaultConfig.tenant.enabled ? ` across ${defaultConfig.tenant.count} tenants` : ''}`);
-    
-    return `${estimatedSeconds}s`;
-}
-
 export let options = {
     vus: defaultConfig.test.vus,
     thresholds: defaultConfig.thresholds,
@@ -60,13 +37,13 @@ export let options = {
             executor: 'per-vu-iterations',
             vus: 1,
             iterations: 1,
-            maxDuration: calculateStartTime(),
+            maxDuration: calculateTimeToIngest(),
             exec: 'initialSetup'
         },
         object_simulation: {
             executor: 'constant-vus',
             vus: defaultConfig.test.vus,
-            startTime: calculateStartTime(), // Dynamic start
+            startTime: calculateTimeToIngest(), // Dynamic start
             duration: defaultConfig.timing.duration,
             exec: 'objectSimulation',
             gracefulStop: '30s'
@@ -100,10 +77,10 @@ export async function initialSetup() {
     
     // Create collection with replication config if needed
     await Collection.create(client, collection, {
-        replicationConfig: (defaultConfig.collection.replicationFactor > 1 || defaultConfig.collection.asyncReplication) ? {
+        replicationConfig: (defaultConfig.collection.replicationFactor > 1 || defaultConfig.collection.asyncReplication || defaultConfig.collection.deleteStrategy !== "NoAutomatedResolution") ? {
             factor: defaultConfig.collection.replicationFactor,
             asyncEnabled: defaultConfig.collection.asyncReplication,
-            deletionStrategy: "NoAutomatedResolution"
+            deletionStrategy: defaultConfig.collection.deleteStrategy
         } : null
     });
 

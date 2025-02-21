@@ -147,7 +147,7 @@ export class WeaviateObject {
         
         if (collection.isMultiTenant && tenants) {
             // Process each tenant with concurrent batches
-            const maxConcurrentTenants = 2;
+            const maxConcurrentTenants = defaultConfig.objects.batchWorkers;
             for (let i = 0; i < tenants.length; i += maxConcurrentTenants) {
                 const currentTenants = tenants.slice(i, i + maxConcurrentTenants);
                 const tenantPromises = currentTenants.map(async tenant => {
