@@ -38,3 +38,26 @@ export function createTenantConfig(name, status = "ACTIVE") {
         activityStatus: status
     };
 }
+
+// Add this utility function near the top
+export function calculateTimeToIngest() {
+    const buffer = 10; // 10-second buffer
+    
+    // Calculate total number of objects to be created
+    const totalObjects = defaultConfig.tenant.enabled ? 
+        defaultConfig.objects.count * defaultConfig.tenant.count : // multiply by number of tenants
+        defaultConfig.objects.count;
+    
+    // Estimate objects per second based on batch settings and tenant configuration
+    const objectsPerSecond = defaultConfig.objects.useBatch ?
+        (defaultConfig.objects.batchSize * 0.1) : // 10 seconds per batch set, using concurrent workers
+        2; // 2 objects/sec single inserts
+    
+    const estimatedSeconds = Math.ceil(
+        totalObjects / objectsPerSecond
+    ) + buffer;
+    
+    console.log(`Estimated setup time: ${estimatedSeconds}s for ${totalObjects} objects${defaultConfig.tenant.enabled ? ` across ${defaultConfig.tenant.count} tenants` : ''}`);
+    
+    return `${estimatedSeconds}s`;
+}

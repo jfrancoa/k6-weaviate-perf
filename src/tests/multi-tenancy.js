@@ -7,6 +7,7 @@ import { Collection } from '../lib/models/Collection.js';
 import { Tenant } from '../lib/models/Tenant.js';
 import { WeaviateObject } from '../lib/models/WeaviateObject.js';
 import { Counter } from 'k6/metrics';
+import { fail } from 'k6';
 
 // Create a counter to track collections
 const collectionsCounter = new Counter('collections_created');
@@ -38,6 +39,10 @@ export function setup() {
     console.log(`- Batch mode: ${defaultConfig.objects.useBatch}`);
     console.log(`- Replication factor: ${defaultConfig.collection.replicationFactor}`);
     console.log(`- Async replication: ${defaultConfig.collection.asyncReplication}`);
+
+    if (!defaultConfig.tenant.enabled) {
+        console.log('Multi-tenancy will be enabled for this test anyway');
+    }
 }
 
 export default async function () {
@@ -60,10 +65,10 @@ export default async function () {
 
         // Create collection
         success = await Collection.create(client, collection, {
-            replicationConfig: defaultConfig.collection.replicationFactor > 1 ? {
+            replicationConfig: (defaultConfig.collection.replicationFactor > 1 || defaultConfig.collection.asyncReplication || defaultConfig.collection.deleteStrategy !== "NoAutomatedResolution") ? {
                 factor: defaultConfig.collection.replicationFactor,
                 asyncEnabled: defaultConfig.collection.asyncReplication,
-                deletionStrategy: "NoAutomatedResolution"
+                deletionStrategy: defaultConfig.collection.deleteStrategy
             } : null
         }) && success;
 

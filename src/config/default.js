@@ -23,6 +23,7 @@ export const defaultConfig = {
         replicationFactor: parseInt(__ENV.REPLICATION_FACTOR || '3'),
         asyncReplication: __ENV.ASYNC_REPLICATION === 'true',
         s3OffloadEnabled: __ENV.S3_OFFLOAD === 'true',
+        deleteStrategy: __ENV.DELETE_STRATEGY || 'NoAutomatedResolution',
     },
     test: {
         vus: parseInt(__ENV.VUS || '1'),

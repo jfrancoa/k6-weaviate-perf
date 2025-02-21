@@ -16,6 +16,7 @@ MIN_THINK_TIME=${MIN_THINK_TIME:-"3"}
 MAX_THINK_TIME=${MAX_THINK_TIME:-"8"}
 REPLICATION_FACTOR=${REPLICATION_FACTOR:-"3"}
 ASYNC_REPLICATION=${ASYNC_REPLICATION:-"false"}
+DELETE_STRATEGY=${DELETE_STRATEGY:-"NoAutomatedResolution"}
 BACKUP_ENABLED=${BACKUP_ENABLED:-"false"}
 CLOUD_ENABLED=${CLOUD_ENABLED:-"false"}
 CLOUD_ZONE=${CLOUD_ZONE:-"amazon:us:ashburn"}
@@ -38,7 +39,8 @@ usage() {
     echo "  --vus <number>            Number of virtual users (default: 1)"
     echo "  --min-think <seconds>     Minimum think time (default: 3)"
     echo "  --max-think <seconds>     Maximum think time (default: 8)"
-    echo "  --replication <factor>    Replication factor (default: 1)"
+    echo "  --replication <factor>    Replication factor (default: 3)"
+    echo "  --delete-strategy <strategy>    Delete strategy [NoAutomatedResolution, TimeBasedResolution, DeleteOnConflict] (default: NoAutomatedResolution)"
     echo "  --async-repl <true/false> Enable async replication (default: false)"
     echo "  --backup <true/false>     Enable backup testing (default: false)"
     echo "  --out <file>              Output file (default: no output). Example: --out json=metrics.json"
@@ -126,6 +128,15 @@ while [[ $# -gt 0 ]]; do
             ASYNC_REPLICATION="$2"
             shift 2
             ;;
+        --delete-strategy)
+            # if strategy is not one of the allowed values fail
+            if [[ "$2" != "NoAutomatedResolution" && "$2" != "TimeBasedResolution" && "$2" != "DeleteOnConflict" ]]; then
+                echo "Error: Invalid delete strategy. Must be one of: NoAutomatedResolution, TimeBasedResolution, DeleteOnConflict"
+                exit 1
+            fi
+            DELETE_STRATEGY="$2"
+            shift 2
+            ;;
         --backup)
             BACKUP_ENABLED="$2"
             shift 2
@@ -195,6 +206,7 @@ $K6_CMD \
     -e MAX_THINK_TIME="$MAX_THINK_TIME" \
     -e REPLICATION_FACTOR="$REPLICATION_FACTOR" \
     -e ASYNC_REPLICATION="$ASYNC_REPLICATION" \
+    -e DELETE_STRATEGY="$DELETE_STRATEGY" \
     -e BACKUP_ENABLED="$BACKUP_ENABLED" \
     ${OUTPUT_FILE:+--out "$OUTPUT_FILE"} \
     ${QUIET:+--quiet "$QUIET"} \
