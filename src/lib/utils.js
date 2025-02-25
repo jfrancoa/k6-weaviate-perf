@@ -16,22 +16,6 @@ export function randomSleep(config = defaultConfig.timing) {
     sleep(thinkTime);
 }
 
-export function createCollectionConfig({
-    class: className,
-    description = "A collection",
-    vectorizer = "none",
-    replicationConfig = null,
-    multiTenancyConfig = { enabled: false, autoTenantCreation: false }
-} = {}) {
-    return {
-        class: className,
-        description,
-        vectorizer,
-        replicationConfig,
-        multiTenancyConfig
-    };
-}
-
 export function createTenantConfig(name, status = "ACTIVE") {
     return {
         name,
@@ -41,7 +25,7 @@ export function createTenantConfig(name, status = "ACTIVE") {
 
 // Add this utility function near the top
 export function calculateTimeToIngest() {
-    const buffer = 10; // 10-second buffer
+    const buffer = 2; // 10-second buffer
     
     // Calculate total number of objects to be created
     const totalObjects = defaultConfig.tenant.enabled ? 
@@ -50,8 +34,8 @@ export function calculateTimeToIngest() {
     
     // Estimate objects per second based on batch settings and tenant configuration
     const objectsPerSecond = defaultConfig.objects.useBatch ?
-        (defaultConfig.objects.batchSize * 0.25) : // 4 seconds per batch set, using concurrent workers
-        10; // 10 objects/sec single inserts
+        (defaultConfig.objects.batchSize * 1) : // 1 seconds per batch set, using concurrent workers
+        300; // 300 objects/sec single inserts
     
     const estimatedSeconds = Math.ceil(
         totalObjects / objectsPerSecond

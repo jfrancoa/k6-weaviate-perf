@@ -11,7 +11,6 @@ export class WeaviateObject {
         const startTime = new Date();
 
         const objectData = {
-            class: collection.name,
             properties,
             vector: vector || WeaviateObject.generateRandomVector()
         };
@@ -21,33 +20,52 @@ export class WeaviateObject {
             objectData.tenant = tenant;
         }
         
-        const response = await client.makeRequest('POST', '/objects', objectData);
-        const success = client.detailedCheck(response, 'object created successfully', 'Create Object');
+        const result = await client.objectInsert(collection.name, objectData);
+        const success = !!result?.id;  // Check for existence of ID indicates success
         
         durationMetrics.createObject.add(new Date() - startTime);
         return success;
     }
 
-    // Batch object creation
+    // Batch object creation (modified for gRPC)
     static async batchObjects(client, collection, objects) {
         const startTime = new Date();
         
-        const response = await client.makeRequest('POST', '/batch/objects', {
-            objects: objects.map(obj => ({
-                class: collection.name,
-                properties: obj.properties,
-                vector: obj.vector,
-                ...(obj.tenant && { tenant: obj.tenant })
-            }))
-        });
-        
-        const success = client.detailedCheck(response, 
-            'batch objects created successfully', 
-            'Create Objects Batch'
-        );
+        const grpcObjects = objects.map(obj => ({
+            class: collection.name,
+            properties: obj.properties,
+            vector: obj.vector,
+            ...(obj.tenant && { tenant: obj.tenant })
+        }));
 
-        durationMetrics.createBatchObjects.add(new Date() - startTime);
-        return success;
+        try {
+            const createResults = await client.batchCreate(grpcObjects);
+            
+            // Handle array response format from Go extension
+            const failedObjects = createResults.filter(r => r.status !== 'success');
+            const success = failedObjects.length === 0;
+
+            if (!success) {
+                console.error('Batch create errors:', {
+                    totalObjects: grpcObjects.length,
+                    failedCount: failedObjects.length,
+                    sampleErrors: failedObjects.slice(0, 3).map(f => ({
+                        id: f.id,
+                        error: f.error,
+                        class: f.class
+                    }))
+                });
+            }
+
+            durationMetrics.createBatchObjects.add(new Date() - startTime);
+            return success;
+        } catch (error) {
+            console.error('Batch create failed:', {
+                error: error.message,
+                sampleObject: grpcObjects[0]
+            });
+            return false;
+        }
     }
 
     // Utility function to chunk array into batches
@@ -224,57 +242,32 @@ export class WeaviateObject {
         const startTime = new Date();
         
         try {
-            // Build query string with proper encoding
-            const params = [
-                'class=' + collection.name,
-                'limit=' + count
-            ];
+            const options = {
+                // Force numeric limit through double conversion
+                limit: Number.parseInt(Number(count))  
+            };
             
             if (collection.isMultiTenant && tenant) {
-                params.push('tenant=' + encodeURIComponent(typeof tenant === 'string' ? tenant : tenant.name));
+                options.tenant = typeof tenant === 'string' ? tenant : tenant.name;
             }
 
-            const url = '/objects?' + params.join('&');
-            const response = await client.makeRequest('GET', url);
+            const result = await client.fetchObjects(collection.name, options);
             
-
-            if (!response || response.status !== 200) {
-                console.error('Failed to get objects:');
-                console.error('- Status:', response?.status);
-                console.error('- URL:', response?.request?.url);
-                console.error('- Response body:', response?.body);
+            if (!result?.objects) {
+                console.error('Failed to get objects:', result);
                 return [];
             }
 
-            if (!response.body) {
-                console.error('Empty response body received');
-                return [];
+            // Verify actual returned count
+            if (result.objects.length > count) {
+                console.warn(`Received more objects (${result.objects.length}) than requested (${count})`);
             }
 
-            try {
-                const result = JSON.parse(response.body);
-
-                if (!result) {
-                    console.error('Failed to parse response body:', response.body);
-                    return [];
-                }
-
-                durationMetrics.fetchObjects.add(new Date() - startTime);
-                return result.objects || [];
-            } catch (parseError) {
-                console.error('Failed to parse response:', {
-                    error: parseError.message,
-                    body: response.body
-                });
-                return [];
-            }
+            durationMetrics.fetchObjects.add(new Date() - startTime);
+            return result.objects.slice(0, count);
 
         } catch (error) {
-            console.error('Error getting objects:', {
-                message: error.message,
-                stack: error.stack,
-                details: error
-            });
+            console.error('Error getting objects:', error.message);
             return [];
         }
     }
@@ -285,59 +278,53 @@ export class WeaviateObject {
         let totalDeleted = 0;
 
         try {
-            // Handle multi-tenancy check
             if (collection.isMultiTenant && !tenant) {
                 throw new Error('Tenant is required for multi-tenant collections');
             }
 
-            // Prepare the base request body
-            const requestBody = {
-                match: {
-                    class: collection.name
+            // Prepare options for gRPC batch delete
+            const options = {
+                where: where || {
+                    operator: "Like",
+                    path: ["id"],
+                    valueString: "*"
                 },
-                output: 'minimal',
+                output: "verbose",
                 dryRun: false
             };
 
-            // Add where filter if provided
-            if (where) {
-                requestBody.match.where = where;
-            }
-
-            // Build URL with tenant query parameter if needed
-            const params = [];
+            // Add tenant to options if present
             if (collection.isMultiTenant && tenant) {
-                params.push('tenant=' + encodeURIComponent(typeof tenant === 'string' ? tenant : tenant.name));
+                options.tenant = typeof tenant === 'string' ? tenant : tenant.name;
             }
-            const url = '/batch/objects' + (params.length > 0 ? '?' + params.join('&') : '');
 
-            // Make the request
-            const response = await client.makeRequest('DELETE', url, requestBody);
+            // Execute gRPC batch delete
+            const deleteResults = await client.batchDelete(collection.name, options);
             
-            if (!response || response.status !== 200) {
-                console.error('Batch deletion failed:', response);
+            // Handle results
+            totalDeleted = deleteResults.successful || 0;
+            
+            if (deleteResults.failed > 0) {
+                console.warn(`Batch delete partial failure: 
+                    ${deleteResults.successful} succeeded, 
+                    ${deleteResults.failed} failed`);
                 success = false;
-            } else {
-                const result = JSON.parse(response.body);
-                totalDeleted = result.results.successful;
+            }
 
-                if (result.results.failed > 0) {
-                    console.warn(`Warning: ${result.results.failed} objects failed to delete`);
-                    success = false;
-                }
+            if (deleteResults.objects) {
+                deleteResults.objects.forEach(obj => {
+                    if (obj.error) {
+                        console.error(`Delete error for ${obj.id}: ${obj.error}`);
+                    }
+                });
             }
 
         } catch (error) {
-            console.error('Error in batch deletion:', error);
+            console.error('Error in gRPC batch deletion:', error);
             success = false;
         }
 
-        // Add metrics
         durationMetrics.deleteBatchObjects.add(new Date() - startTime);
-
-        return {
-            success,
-            totalDeleted
-        };
+        return { success, totalDeleted };
     }
 } 

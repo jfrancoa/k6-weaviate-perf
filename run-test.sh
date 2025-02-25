@@ -2,6 +2,7 @@
 
 # Default values
 WEAVIATE_HOST=${WEAVIATE_HOST:-"http://localhost:8080"}
+WEAVIATE_GRPC_HOST=${WEAVIATE_GRPC_HOST:-"localhost:50051"}
 WEAVIATE_API_KEY=${WEAVIATE_API_KEY:-""}
 MULTI_TENANCY=${MULTI_TENANCY:-"false"}
 AUTO_TENANT_CREATION=${AUTO_TENANT_CREATION:-"false"}
@@ -26,6 +27,7 @@ usage() {
     echo "Usage: $0 [options] <test-name>"
     echo "Options:"
     echo "  --host <url>              Weaviate host URL (default: http://localhost:8080)"
+    echo "  --grpc-host <url>         Weaviate grpc host URL (default: localhost:50051)"
     echo "  --api-key <key>           Weaviate API key"
     echo "  --multi-tenant <true/false> Enable multi-tenancy (default: true)"
     echo "  --auto-tenant <true/false> Enable auto tenant creation (default: false)"
@@ -47,6 +49,7 @@ usage() {
     echo "  --quiet <true/false>      Enable quiet mode (default: false)"
     echo "  --cloud <true/false>      Enable k6 cloud execution (default: false)"
     echo "  --cloud-zone <zone>       k6 cloud zone (default: amazon:us:ashburn)"
+    echo "  --verbose <true/false>   Enable verbose mode (default: false)"
     echo "  -h, --help               Display this help message"
     echo
     echo "Available tests:"
@@ -66,6 +69,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --host)
             WEAVIATE_HOST="$2"
+            shift 2
+            ;;
+        --grpc-host)
+            WEAVIATE_GRPC_HOST="$2"
             shift 2
             ;;
         --api-key)
@@ -157,6 +164,10 @@ while [[ $# -gt 0 ]]; do
             CLOUD_ZONE="$2"
             shift 2
             ;;
+        --verbose)
+            VERBOSE="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             ;;
@@ -181,16 +192,22 @@ if [ ! -f "$TEST_FILE" ]; then
 fi
 
 # Build k6 command with environment variables
-K6_CMD="k6 run"
+#K6_CMD="k6 run"
+K6_CMD="/Users/jfrancoa/repos/xk6-weaviate/k6 run"
 
 # Add cloud options if enabled
 if [ "$CLOUD_ENABLED" = "true" ]; then
-    K6_CMD="k6 cloud run -e CLOUD_ZONE=$CLOUD_ZONE"
+    #K6_CMD="k6 cloud run -e CLOUD_ZONE=$CLOUD_ZONE"
+    K6_CMD="/Users/jfrancoa/repos/xk6-weaviate/k6 cloud run -e CLOUD_ZONE=$CLOUD_ZONE"
 fi
 
+if [ "$VERBOSE" = "true" ]; then
+    K6_CMD="$K6_CMD -vvv"
+fi
 # Run k6 test with environment variables
 $K6_CMD \
     -e WEAVIATE_HOST="$WEAVIATE_HOST" \
+    -e WEAVIATE_GRPC_HOST="$WEAVIATE_GRPC_HOST" \
     -e WEAVIATE_API_KEY="$WEAVIATE_API_KEY" \
     -e MULTI_TENANCY="$MULTI_TENANCY" \
     -e AUTO_TENANT_CREATION="$AUTO_TENANT_CREATION" \

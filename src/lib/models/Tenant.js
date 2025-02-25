@@ -11,11 +11,12 @@ export class Tenant {
         const startTime = new Date();
         
         const config = [createTenantConfig(tenantName)];
-        const response = await client.makeRequest('POST', `/schema/${collectionName}/tenants`, config);
-        const success = client.detailedCheck(response, 
-            'tenant created successfully', 
-            'Create Tenant'
-        );
+        try {
+            await client.createTenant(collectionName, config);
+        } catch (error) {
+            console.error("Tenant creation failed", error.message);
+            throw error;
+        }
         
         durationMetrics.createTenants.add(new Date() - startTime);
         if (success) {
@@ -27,45 +28,44 @@ export class Tenant {
 
     static async delete(client, collectionName, tenantName) {
         const startTime = new Date();
-        
-        const response = await client.makeRequest('DELETE', `/schema/${collectionName}/tenants`, [tenantName]);
-        const success = client.detailedCheck(response,
-            'tenant deleted successfully',
-            'Delete Tenant'
-        );
-        
-        durationMetrics.tenantDeletion.add(new Date() - startTime);
-        if (success) {
+        try {
+            // Pass tenant name as array to match Go extension expectation
+            await client.deleteTenant(collectionName, [tenantName]);
+            durationMetrics.tenantDeletion.add(new Date() - startTime);
             operationCounters.tenantsDeleted.add(1);
+            return true;
+        } catch (error) {
+            console.error("Tenant deletion failed", error.message);
+            return false;
         }
-        
-        return success;
     }
 
     static async updateStatus(client, collectionName, tenantName, status) {
         const startTime = new Date();
-        const operation = `tenant ${status.toLowerCase()}`;
+        let success = false;
         
-        const config = [createTenantConfig(tenantName, status)];
-        const response = await client.makeRequest('PUT', `/schema/${collectionName}/tenants`, config);
-        const success = client.detailedCheck(response,
-            `tenant ${status.toLowerCase()}d successfully`,
-            `${status} Tenant`
-        );
-        
+        try {
+            const config = [createTenantConfig(tenantName, status)];
+            await client.updateTenant(collectionName, config);
+            success = true;
+        } catch (error) {
+            console.error("Tenant update failed", error.message);
+            success = false;
+        }
+
         // Update metrics based on status
         switch(status) {
             case 'ACTIVE':
                 durationMetrics.tenantActivation.add(new Date() - startTime);
-                if (success) operationCounters.tenantsActivated.add(1);
+                operationCounters.tenantsActivated.add(success ? 1 : 0);
                 break;
             case 'INACTIVE':
                 durationMetrics.tenantDeactivation.add(new Date() - startTime);
-                if (success) operationCounters.tenantsDeactivated.add(1);
+                operationCounters.tenantsDeactivated.add(success ? 1 : 0);
                 break;
             case 'OFFLOADED':
                 durationMetrics.tenantOffload.add(new Date() - startTime);
-                if (success) operationCounters.tenantsOffloaded.add(1);
+                operationCounters.tenantsOffloaded.add(success ? 1 : 0);
                 break;
         }
         
@@ -94,13 +94,7 @@ export class Tenant {
                 activityStatus: "ACTIVE"
             }));
 
-            const response = await client.makeRequest(
-                'POST',
-                `/schema/${collection.name}/tenants`,
-                tenants
-            );
-
-            success = client.detailedCheck(response, 'tenants created successfully', 'Create Tenants');
+            await client.createTenant(collection.name, tenants);
         } catch (error) {
             console.error('Error creating tenants:', error);
             success = false;

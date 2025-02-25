@@ -8,6 +8,7 @@ import { Tenant } from '../lib/models/Tenant.js';
 import { WeaviateObject } from '../lib/models/WeaviateObject.js';
 import { Counter } from 'k6/metrics';
 import { fail } from 'k6';
+import weaviate from 'k6/x/weaviate';
 
 // Create a counter to track collections
 const collectionsCounter = new Counter('collections_created');
@@ -28,7 +29,14 @@ export let options = {
 };
 
 // Initialize the client
-const client = new WeaviateClient();
+const client = weaviate.newClient({
+    host: defaultConfig.weaviate.host,
+    apiKey: defaultConfig.weaviate.apiKey,
+    grpcHost: defaultConfig.weaviate.grpcHost,
+})
+
+// Initialize the client
+const httpClient = new WeaviateClient({host: 'http://localhost:8080', apiKey: null});
 
 export function setup() {
     console.log('\nTest configuration:');
@@ -46,12 +54,14 @@ export function setup() {
 }
 
 export default async function () {
-    let startTime = new Date();
+    const startTime = new Date();
     let success = true;
+    let collectionName;
+    let tenantNames;
 
     try {
-        // Generate unique collection name for this VU
-        const collectionName = getUniqueCollectionName();
+        // Generate unique collection name
+        collectionName = getUniqueCollectionName();
         collectionsCounter.add(1);
         
         console.log(`\nVU ${__VU}: Creating collection ${collectionName}`);
@@ -64,6 +74,7 @@ export default async function () {
         );
 
         // Create collection
+        console.log(`Creating collection ${collectionName}`);
         success = await Collection.create(client, collection, {
             replicationConfig: (defaultConfig.collection.replicationFactor > 1 || defaultConfig.collection.asyncReplication || defaultConfig.collection.deleteStrategy !== "NoAutomatedResolution") ? {
                 factor: defaultConfig.collection.replicationFactor,
@@ -72,20 +83,24 @@ export default async function () {
             } : null
         }) && success;
 
+
         // Wait for collection to be ready before proceeding
         sleep(2);
 
+        console.log(`Collection ${collectionName} created`);
         // Verify collection exists before creating tenants
-        const schemaResponse = await client.makeRequest('GET', `/schema/${collectionName}`);
+        const schemaResponse = await httpClient.makeRequest('GET', `/schema/${collectionName}`);
         if (schemaResponse.status !== 200) {
             console.log(`Waiting for collection ${collectionName} to be ready...`);
             sleep(3); // Wait a bit longer if collection is not ready
         }
 
+        console.log(`Generating ${defaultConfig.tenant.count} tenant names`);
         // Generate tenant names
-        const tenantNames = generateTenantNames(defaultConfig.tenant.count, collectionName);
+        tenantNames = generateTenantNames(defaultConfig.tenant.count, collectionName);
         
         if (!defaultConfig.tenant.autoCreation) {
+            console.log(`Tenant names: ${tenantNames}`);
             success = await Tenant.createMany(client, collection, tenantNames) && success;
             if (!success) {
                 console.error('Failed to create tenants');
@@ -94,9 +109,10 @@ export default async function () {
             // Add a small delay to ensure tenants are fully created
             sleep(2);
         }
-
+        
         // Create objects only if previous steps were successful
         if (success) {
+            console.log(`Creating objects for tenants: ${tenantNames}`);
             success = await WeaviateObject.createMany(
                 client,
                 collection,
@@ -114,14 +130,15 @@ export default async function () {
 
         // Only proceed with tenant operations if objects were created successfully
         if (success) {
+            console.log(`Deactivating tenants: ${tenantNames}`);
             // Deactivate tenants (HOT to COLD)
             for (const tenantName of tenantNames) {
                 success = await Tenant.deactivate(client, collectionName, tenantName) && success;
             }
-
             // Random sleep between state changes
             randomSleep();
 
+            console.log(`Reactivating tenants: ${tenantNames}`);
             // Reactivate tenants (COLD to HOT)
             for (const tenantName of tenantNames) {
                 success = await Tenant.activate(client, collectionName, tenantName) && success;
@@ -142,17 +159,25 @@ export default async function () {
                 }
             }
 
+            console.log(`Deleting tenants: ${tenantNames}`);
             // Delete tenants
             for (const tenantName of tenantNames) {
                 success = await Tenant.delete(client, collectionName, tenantName) && success;
             }
 
             // Clean up - delete the collection
+            console.log(`Deleting collection: ${collectionName}`);
             success = await Collection.delete(client, collection) && success;
+            console.log(`Collection ${collectionName} deleted`);
         }
 
     } catch (error) {
-        console.error('Test failed:', error);
+        console.error('Test failed:', {
+            message: error.message,
+            stack: error.stack,
+            collection: collectionName,
+            tenants: tenantNames
+        });
         success = false;
     }
 

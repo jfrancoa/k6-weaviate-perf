@@ -8,6 +8,7 @@ import { Tenant } from '../lib/models/Tenant.js';
 import { WeaviateObject } from '../lib/models/WeaviateObject.js';
 import { Counter, Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
+import weaviate from 'k6/x/weaviate';
 
 // Custom metrics
 const objectsCreated = new Counter('objects_created');
@@ -52,7 +53,11 @@ export let options = {
 };
 
 // Initialize the client
-const client = new WeaviateClient();
+const client = weaviate.newClient({
+    host: defaultConfig.weaviate.host,
+    apiKey: defaultConfig.weaviate.apiKey,
+    grpcHost: defaultConfig.weaviate.grpcHost,
+})
 
 export async function initialSetup() {
     console.log('\nInitial Setup:');
@@ -151,7 +156,6 @@ export async function objectSimulation() {
                 tenantName,
                 operationCount
             );
-
             if (objectsToDelete.length > 0) {
                 const result = await WeaviateObject.deleteMany(
                     client,
@@ -160,7 +164,7 @@ export async function objectSimulation() {
                     {
                         path: ['id'],
                         operator: 'ContainsAny',
-                        valueTextArray: objectsToDelete.map(obj => obj.id)
+                        valueText: objectsToDelete.map(obj => obj.id || obj._id)
                     }
                 );
 

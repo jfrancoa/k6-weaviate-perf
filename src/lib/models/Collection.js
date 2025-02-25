@@ -1,13 +1,13 @@
 import { durationMetrics } from '../metrics.js';
-import { createCollectionConfig } from '../utils.js';
 import { Tenant } from './Tenant.js';
 import { WeaviateObject } from './WeaviateObject.js';
 
 export class Collection {
-    constructor(name, isMultiTenant = true, autoTenantCreation = false) {
+    constructor(name, isMultiTenant = true, autoTenantCreation = false, autoTenantActivation = false) {
         this.name = name;
         this.isMultiTenant = isMultiTenant;
         this.autoTenantCreation = autoTenantCreation;
+        this.autoTenantActivation = autoTenantActivation;
     }
 
     static async create(client, collection, {
@@ -23,29 +23,44 @@ export class Collection {
             deletionStrategy: replicationConfig.deletionStrategy || "NoAutomatedResolution"
         } : null;
 
-        // Only include multiTenancyConfig if this is a multi-tenant collection
-        const config = createCollectionConfig({
-            class: collection.name,
-            description,
-            vectorizer,
-            replicationConfig: formattedReplicationConfig,
-            multiTenancyConfig: collection.isMultiTenant
-                ? { enabled: true, autoTenantCreation: collection.autoTenantCreation }
-                : { enabled: false, autoTenantCreation: false }
-        });
+        // Add vector index configuration for "none" vectorizer
+        const config = {
+            "description": description,
+            "vectorizer": vectorizer,
+            "replicationConfig": formattedReplicationConfig,
+            "multiTenancy": collection.isMultiTenant
+                ? { 
+                    enabled: true, 
+                    autoTenantCreation: collection.autoTenantCreation, 
+                    autoTenantActivation: collection.autoTenantActivation 
+                  }
+                : { enabled: false }
+        };
 
-        const response = await client.makeRequest('POST', '/schema', config);
-        const success = client.detailedCheck(response, 'collection created successfully', 'Create Collection');
-        
+        try {
+            await client.createCollection(collection.name, config);
+        } catch (error) {
+            console.error("Collection creation failed:", {
+                error: error.message,
+                config: config  // Log the full config for debugging
+            });
+            throw error;
+        }
         durationMetrics.createCollection.add(new Date() - startTime);
-        return success;
+        return true; // Fixed missing return value
     }
 
     static async delete(client, collection) {
         const startTime = new Date();
+        let success = false;
         
-        const response = await client.makeRequest('DELETE', `/schema/${collection.name}`);
-        const success = client.detailedCheck(response, 'collection deleted successfully', 'Delete Collection');
+        try {
+            await client.deleteCollection(collection.name);
+            success = true;
+        } catch (error) {
+            console.error("Collection deletion failed", error.message);
+            success = false;
+        }
         
         durationMetrics.deleteCollection.add(new Date() - startTime);
         return success;

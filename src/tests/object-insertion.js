@@ -7,6 +7,7 @@ import { Collection } from '../lib/models/Collection.js';
 import { Tenant } from '../lib/models/Tenant.js';
 import { WeaviateObject } from '../lib/models/WeaviateObject.js';
 import { Counter } from 'k6/metrics';
+import weaviate from 'k6/x/weaviate';
 
 // Create a counter to track collections
 const collectionsCounter = new Counter('collections_created');
@@ -43,7 +44,12 @@ export let options = {
 };
 
 // Shared state between iterations
-const client = new WeaviateClient();
+// Initialize the client
+const client = weaviate.newClient({
+    host: defaultConfig.weaviate.host,
+    apiKey: defaultConfig.weaviate.apiKey,
+    grpcHost: defaultConfig.weaviate.grpcHost,
+})
 
 export function setup() {
     console.log('\nTest configuration:');
