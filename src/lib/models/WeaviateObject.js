@@ -28,11 +28,11 @@ export class WeaviateObject {
     }
 
     // Batch object creation (modified for gRPC)
-    static async batchObjects(client, collection, objects) {
+    static async batchObjects(client, objects) {
         const startTime = new Date();
         
         const grpcObjects = objects.map(obj => ({
-            class: collection.name,
+            class: obj.class,
             properties: obj.properties,
             vector: obj.vector,
             ...(obj.tenant && { tenant: obj.tenant })
@@ -88,10 +88,11 @@ export class WeaviateObject {
                 timestamp: new Date().toISOString()
             };
 
+            const vector = this.generateRandomVector();
             const obj = {
                 class: collection.name,
                 properties,
-                vector: this.generateRandomVector()
+                vector: vector
             };
 
             if (tenant) {
@@ -112,7 +113,7 @@ export class WeaviateObject {
 
         const processNextBatch = async (batch) => {
             try {
-                const promise = this.batchObjects(client, collection, batch);
+                const promise = this.batchObjects(client, batch);
                 inFlightPromises.add(promise);
                 
                 const result = await promise;
