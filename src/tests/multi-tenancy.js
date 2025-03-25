@@ -163,4 +163,60 @@ export default async function () {
     errorRate.add(!success);
     
     sleep(1); // Small delay between iterations
+}
+
+export async function teardown() {
+    // Clean up all collections created during the test
+    console.log('\nCleaning up collections...');
+    
+    try {
+        // Get all collections from schema
+        const response = await client.makeRequest('GET', '/schema');
+        if (!response || response.status !== 200) {
+            console.error('Failed to get schema:', response ? response.status : 'No response');
+            console.error('Response details:', response);
+            return;
+        }
+
+        let schema;
+        try {
+            schema = JSON.parse(response.body);
+            console.log('Successfully parsed schema response');
+        } catch (error) {
+            console.error('Failed to parse schema response:', error);
+            console.error('Response body:', response.body);
+            return;
+        }
+
+        if (!schema || !schema.classes) {
+            console.error('Invalid schema response format:', schema);
+            console.error('Full response:', response);
+            return;
+        }
+
+        // Filter collections created by this test (they start with Collection_VU)
+        const testCollections = schema.classes
+            .filter(c => c.class && c.class.startsWith('Collection_VU'))
+            .map(c => c.class);
+
+        console.log(`Found ${testCollections.length} collections to clean up`);
+
+        // Delete each collection
+        for (const collectionName of testCollections) {
+            const collection = new Collection(collectionName, false, false);
+            await Collection.delete(client, collection);
+            console.log(`Deleted collection: ${collectionName}`);
+        }
+    } catch (error) {
+        console.error('Cleanup failed:', error);
+        if (error.response) {
+            console.error('Response details:', {
+                status: error.response.status,
+                body: error.response.body,
+                headers: error.response.headers
+            });
+        }
+    }
+
+    console.log('Cleanup completed');
 } 
