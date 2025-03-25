@@ -34,7 +34,7 @@ export function calculateTimeToIngest() {
     
     // Estimate objects per second based on batch settings and tenant configuration
     const objectsPerSecond = defaultConfig.objects.useBatch ?
-        (defaultConfig.objects.batchSize * 1) : // 1 seconds per batch set, using concurrent workers
+        (defaultConfig.objects.batchSize / 1.5) : // 1.5 seconds per batch
         300; // 300 objects/sec single inserts
     
     const estimatedSeconds = Math.ceil(

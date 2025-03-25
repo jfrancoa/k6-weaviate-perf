@@ -35,8 +35,8 @@ const client = weaviate.newClient({
     grpcHost: defaultConfig.weaviate.grpcHost,
 })
 
-// Initialize the client
-const httpClient = new WeaviateClient({host: 'http://localhost:8080', apiKey: null});
+// Initialize the HTTP client
+const httpClient = new WeaviateClient({host: defaultConfig.weaviate.host, apiKey: defaultConfig.weaviate.apiKey});
 
 export function setup() {
     console.log('\nTest configuration:');

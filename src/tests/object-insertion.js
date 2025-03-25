@@ -51,6 +51,9 @@ const client = weaviate.newClient({
     grpcHost: defaultConfig.weaviate.grpcHost,
 })
 
+// Initialize the HTTP client
+const httpClient = new WeaviateClient({host: defaultConfig.weaviate.host, apiKey: defaultConfig.weaviate.apiKey});
+
 export function setup() {
     console.log('\nTest configuration:');
     console.log(`- Virtual Users: ${defaultConfig.test.vus}`);
@@ -100,7 +103,7 @@ export default async function () {
             
             if (!defaultConfig.tenant.autoCreation) {
                 // Verify collection exists before creating tenants
-                const schemaResponse = await client.makeRequest('GET', `/schema/${collectionName}`);
+                const schemaResponse = await httpClient.makeRequest('GET', `/schema/${collectionName}`);
                 if (schemaResponse.status !== 200) {
                     console.log(`Waiting for collection ${collectionName} to be ready...`);
                     sleep(3); // Wait a bit longer if collection is not ready
@@ -142,7 +145,7 @@ export async function teardown() {
     
     try {
         // Get all collections from schema
-        const response = await client.makeRequest('GET', '/schema');
+        const response = await httpClient.makeRequest('GET', '/schema');
         if (!response || response.status !== 200) {
             console.error('Failed to get schema:', response ? response.status : 'No response');
             console.error('Response details:', response);
